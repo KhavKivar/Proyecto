@@ -106,6 +106,7 @@ __global__ void conv_img_gpu(float *img, float *kernel, float *imgf, int Nx, int
       {
         ii = kj + ix - center;
         jj = ki + iy - center;
+        if(jj * Nx + ii < Nx*Ny)
         sum += img[jj * Nx + ii] * sdata[ki * kernel_size + kj];
       }
     imgf[idx] = sum;
@@ -143,6 +144,7 @@ __global__ void conv_img_gpu_f2(float *img, float *kernel, float *imgf, int Nx, 
        {
          ii = kj + ix - center;
          jj = ki + iy - center;
+         if(jj * Nx + ii < Nx*Ny)
          sum += img[jj * Nx + ii] * kernel[ki * kernel_size + kj];
        }
     
@@ -172,14 +174,14 @@ int main(int argc, char *argv[])
   char finput[256], foutput[256], foutput_cpu[256];
   int Nblocks, Nthreads;
 
-  sprintf(finput, "pai.dat");
+  sprintf(finput, "2k.dat");
 
   sprintf(foutput, "gpu_output.dat");
   sprintf(foutput_cpu, "cpu_output.dat");
 
 
-  Nx = 1280;
-  Ny = 720;
+  Nx = 2560;
+  Ny = 1440;
 
   kernel_size = 3;
   sigma = 0.55;

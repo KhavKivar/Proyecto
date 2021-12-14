@@ -27,11 +27,13 @@ void save_image(char *fname, int Nx, int Ny, float *img)
   FILE *fp;
 
   fp = fopen(fname, "w");
-
+  
   for (int i = 0; i < Ny; i++)
   {
-    for (int j = 0; j < Nx; j++)
+    for (int j = 0; j < Nx; j++){
       fprintf(fp, "%10.3f ", img[i * Nx + j]);
+    
+    }
     fprintf(fp, "\n");
   }
 
@@ -83,41 +85,49 @@ void conv_img_cpu(float *img, float *kernel, float *imgf, int Nx, int Ny, int ke
 }
 
 
-__global__ void conv_img_gpu(float *img, float *kernel, float *imgf, int Nx, int Ny, int kernel_size,int offset)
+__global__ void conv_img_gpu(float *img, float *kernel, float *imgf, int Nx, int Ny, int kernel_size)
 {
 
   int tid = threadIdx.x;
   int iy = blockIdx.x + (kernel_size - 1) / 2;
-  int ix = threadIdx.x + (kernel_size - 1) / 2+offset;
-  int idx = iy * Nx + ix;
+
+  int idx = iy * Nx;
   int K2 = kernel_size * kernel_size;
   int center = (kernel_size - 1) / 2;
   int ii, jj;
   float sum = 0.0;
   extern __shared__ float sdata[];
 
-  if (tid < K2)
-    sdata[tid] = kernel[tid];
-  __syncthreads();
-  
-  if (idx < Nx * Ny && ix<Nx)
+  if (idx < Ny*Nx )
   {
-    for (int ki = 0; ki < kernel_size; ki++)
-      for (int kj = 0; kj < kernel_size; kj++)
-      {
-        ii = kj + ix - center;
-        jj = ki + iy - center;
-        sum += img[jj * Nx + ii] * sdata[ki * kernel_size + kj];
-      }
-      printf("%f",sum);
-    imgf[idx] = sum;
+    for(int i = center;i<(Nx - center);i++){
+      sum = 0;
+      for (int ki = 0; ki < kernel_size; ki++)
+        for (int kj = 0; kj < kernel_size; kj++)
+        {
+          ii = kj + i - center;
+          jj = ki + iy - center;
+          if(jj * Nx + ii < Nx*Ny)
+          sum += img[jj * Nx + ii] * kernel[ki * kernel_size + kj];
+        }
+
+      imgf[idx+i] = sum;
+   }
   }
 }
 
 
 
 
-
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess) 
+   {
+      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
 
 
 
@@ -139,14 +149,14 @@ int main(int argc, char *argv[])
   char finput[256], foutput[256], foutput_cpu[256];
   int Nblocks, Nthreads;
 
-  sprintf(finput, "2k.dat");
+  sprintf(finput, "dog.dat");
 
   sprintf(foutput, "gpu_output.dat");
   sprintf(foutput_cpu, "cpu_output.dat");
 
 
-  Nx = 2560;
-  Ny = 1440;
+  Nx = 750;
+  Ny = 750;
 
   kernel_size = 3;
   sigma = 0.55;
@@ -205,11 +215,13 @@ int main(int argc, char *argv[])
   
   int grid_size = (Ny - (kernel_size - 1));
 
-  for (int i = 0; i < (int)ceil((float)Nx / block_size); i++) {
-    conv_img_gpu<<<grid_size, block_size, kernel_size * kernel_size * sizeof(float)>>>(d_img, d_kernel, d_imgf, Nx, Ny, kernel_size, i * block_size);    
-  }
-  
-  cudaDeviceSynchronize();
+
+  conv_img_gpu<<<grid_size, 1, kernel_size * kernel_size * sizeof(float)>>>(d_img, d_kernel, d_imgf, Nx, Ny, kernel_size);    
+
+
+  gpuErrchk( cudaPeekAtLastError() );
+  gpuErrchk( cudaDeviceSynchronize() );
+
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&milliseconds, start, stop);
@@ -217,7 +229,7 @@ int main(int argc, char *argv[])
   
   printf("Tiempo (GPU): %f ms\n", milliseconds);
 
-  cudaMemcpy(imgf, d_imgf, Nx * Ny * sizeof(float), cudaMemcpyDeviceToHost);
+  gpuErrchk(cudaMemcpy(imgf, d_imgf, Nx * Ny * sizeof(float), cudaMemcpyDeviceToHost));
 
 
 
