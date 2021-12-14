@@ -1,17 +1,3 @@
-/*
- Copyright (c) Loizos Koutsantonis <loizos.koutsantonis@uni.lu>
-
- Description : CUDA code implementing convolution of an image with a 
- LoG kernel. 
- Implemented for educational purposes.
-
- This program is free software: you can redistribute it and/or modify
- it under the terms of the NVIDIA Software License Agreement and CUDA 
- Supplement to Software License Agreement. 
-
- University of Luxembourg - HPC 
- November 2020
-*/
 
 #include <stdio.h>
 #include <math.h>
@@ -20,13 +6,6 @@
 
 #define pi 3.14159265359
 
-/*
-Function load_image:
-Load BW Image from dat (Ascii) file (Host Function)
-Nx,Ny: Image Dimensions
-fname: fielename (char)
-img: float vector containing the image pixels
-*/
 void load_image(char *fname, int Nx, int Ny, float *img)
 {
   FILE *fp;
@@ -43,13 +22,6 @@ void load_image(char *fname, int Nx, int Ny, float *img)
   fclose(fp);
 }
 
-/*
-Function save_image:
-Save BW Image to dat (Ascii) file (Host Function)
-Nx,Ny: Image Dimensions
-fname: fielename (char)
-img: float vector containing the image pixels
-*/
 void save_image(char *fname, int Nx, int Ny, float *img)
 {
   FILE *fp;
@@ -74,6 +46,8 @@ kernel_size: Length of filter window in pixels (same for x and y)
 sigma: sigma of the Gaussian kernel (float) given in pixels
 kernel: float vector hosting the kernel coefficients
 */
+
+
 void calculate_kernel(int kernel_size, float sigma, float *kernel)
 {
 
@@ -99,6 +73,7 @@ imgf: float vector containing the result of the convolution
 Nx,Ny: Original Image Dimensions
 kernel_size: Length of filter window in pixels (same for x and y)
 */
+
 void conv_img_cpu(float *img, float *kernel, float *imgf, int Nx, int Ny, int kernel_size)
 {
 
@@ -135,9 +110,10 @@ kernel_size: Length of filter window in pixels (same for x and y)
 */
 __global__ void conv_img_gpu(float *img, float *kernel, float *imgf, int Nx, int Ny, int kernel_size)
 {
-
+ 
   //local ID of each thread (withing block)
   int tid = threadIdx.x;
+ 
 
   //each block is assigned to a row of an image, iy index of y value
   int iy = blockIdx.x + (kernel_size - 1) / 2;
@@ -195,10 +171,74 @@ Important: tid index must not exceed the size of the kernel*/
         jj = ki + iy - center;
         sum += img[jj * Nx + ii] * sdata[ki * kernel_size + kj];
       }
-
+    
     imgf[idx] = sum;
   }
 }
+
+
+
+__global__ void conv_img_gpu_version2(float *img, float *kernel, float *imgf, int Nx, int Ny, int kernel_size)
+{
+ 
+  //local ID of each thread (withing block)
+  int tid = threadIdx.x;
+ 
+
+  //each block is assigned to a row of an image, iy index of y value
+  int iy = blockIdx.x + (kernel_size - 1) / 2;
+
+  //each thread is assigned to a pixel of a row, ix index of x value
+  int ix = threadIdx.x + (kernel_size - 1) / 2;
+
+  //idx global index (all blocks) of the image pixel
+  int idx = iy * Nx + ix;
+
+  //total number of kernel elements
+  int K2 = kernel_size * kernel_size;
+
+  //center of kernel in both 
+  int center = (kernel_size - 1) / 2;
+
+  int ii, jj;
+  float sum = 0.0;
+
+
+  extern __shared__ float sdata[];
+
+
+  if (tid < K2)
+    sdata[tid] = kernel[tid];
+  __syncthreads();
+
+  if (idx < Nx * Ny)
+  {
+    
+    for (int ki = 0; ki < kernel_size; ki++)
+      for (int kj = 0; kj < kernel_size; kj++)
+      {
+        ii = kj + ix - center;
+        jj = ki + iy - center;
+        sum += img[jj * Nx + ii] * sdata[ki * kernel_size + kj];
+      }
+    
+    imgf[idx] = sum;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 int main(int argc, char *argv[])
 {
@@ -206,7 +246,6 @@ int main(int argc, char *argv[])
   clock_t t1, t2;
   double ms;
 
-  float dt;
 
   float milliseconds = 0;
   int Nx, Ny;
@@ -224,7 +263,7 @@ int main(int argc, char *argv[])
   Nx = 750;
   Ny = 750;
 
-  kernel_size = 5;
+  kernel_size = 3;
   sigma = 0.55;
   
 
@@ -277,23 +316,22 @@ int main(int argc, char *argv[])
   Nblocks = Ny - (kernel_size - 1);
   Nthreads = Nx - (kernel_size - 1);
 
-
-
+  printf("%d \n",Nblocks);
+  printf("%d \n",Nthreads);
 
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
   cudaEventRecord(start);
   conv_img_gpu<<<Nblocks, Nthreads, kernel_size * kernel_size * sizeof(float)>>>(d_img, d_kernel, d_imgf, Nx, Ny, kernel_size);
-
-  cudaError_t cudaerr = cudaDeviceSynchronize();
-  if (cudaerr != cudaSuccess)
-      printf("kernel launch failed with error \"%s\".\n",
-             cudaGetErrorString(cudaerr));
-
+  cudaDeviceSynchronize();
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&milliseconds, start, stop);
+
+
+
+  conv_img_gpu_version2<<<2198, 256, kernel_size * kernel_size * sizeof(float)>>>(d_img, d_kernel, d_imgf, Nx, Ny, kernel_size);
 
 
   
